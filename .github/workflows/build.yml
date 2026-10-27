@@ -21,13 +21,32 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: 安装 Android SDK
-        uses: android-actions/setup-android@v3
+      - name: 配置 Android SDK
+        run: |
+          SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          if [ -z "$SDK_ROOT" ] || [ ! -d "$SDK_ROOT" ]; then
+            SDK_ROOT="/usr/local/lib/android/sdk"
+          fi
+          echo "SDK_ROOT=$SDK_ROOT"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+
+          SDKM="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKM" ]; then
+            SDKM="$(find "$SDK_ROOT/cmdline-tools" -name sdkmanager -type f 2>/dev/null | head -1)"
+          fi
+          echo "sdkmanager: $SDKM"
+          yes | "$SDKM" --licenses > /dev/null 2>&1 || true
+          "$SDKM" "platforms;android-34" "build-tools;34.0.0" "platform-tools" > /dev/null 2>&1 || true
+
+          echo "--- 已安装组件 ---"
+          ls "$SDK_ROOT/platforms" || true
+          ls "$SDK_ROOT/build-tools" || true
 
       - name: 编译 debug APK
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
@@ -41,7 +60,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          cp app/build/outputs/apk/debug/app-debug.apk LocalMusic-v1.0.apk
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest app/build/outputs/apk/debug/app-debug.apk \
-            --title "最新构建" \
-            --notes "由 GitHub Actions 自动编译的 debug 版 APK，可直接安装。"
+          gh release create latest LocalMusic-v1.0.apk \
+            --title "本地音乐播放器 v1.0" \
+            --notes "极简本地音乐播放器。只能播放手机里的本地音频，一个「定时关闭 2 小时」按钮，无联网权限。安装前需在系统设置里允许「安装未知来源应用」。" \
+            --latest

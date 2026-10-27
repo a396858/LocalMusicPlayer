@@ -34,7 +34,6 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     private var controller: MediaController? = null
     private var tickJob: Job? = null
-    private var sleepJob: Job? = null
     private var pendingSong: Song? = null
 
     private val mainExecutor = Executor { it.run() }
@@ -57,9 +56,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private val _durationMs = MutableStateFlow(0L)
     val durationMs: StateFlow<Long> = _durationMs.asStateFlow()
 
-    /** 定时关闭剩余毫秒；0 表示没有开启 */
-    private val _sleepRemainingMs = MutableStateFlow(0L)
-    val sleepRemainingMs: StateFlow<Long> = _sleepRemainingMs.asStateFlow()
+    /** 定时关闭剩余毫秒；0 表示没有开启。状态在进程级单例里，退出界面不丢。 */
+    val sleepRemainingMs: StateFlow<Long> = SleepTimer.remainingMs
 
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -190,30 +188,13 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * 一次点击：开启 2 小时定时关闭；再点一次：取消。
+     * 计时器由 [SleepTimer] 持有，退到后台或退出界面都会继续走。
      */
-    fun toggleSleepTimer() {
-        if (_sleepRemainingMs.value > 0L) cancelSleepTimer() else startSleepTimer(SLEEP_DURATION_MS)
-    }
+    fun toggleSleepTimer() = SleepTimer.toggle(SLEEP_DURATION_MS)
 
-    fun startSleepTimer(totalMs: Long) {
-        sleepJob?.cancel()
-        _sleepRemainingMs.value = totalMs
-        sleepJob = viewModelScope.launch {
-            var remaining = totalMs
-            while (remaining > 0L) {
-                delay(1_000L)
-                remaining = (remaining - 1_000L).coerceAtLeast(0L)
-                _sleepRemainingMs.value = remaining
-            }
-            controller?.pause()
-        }
-    }
+    fun startSleepTimer(totalMs: Long) = SleepTimer.start(totalMs)
 
-    fun cancelSleepTimer() {
-        sleepJob?.cancel()
-        sleepJob = null
-        _sleepRemainingMs.value = 0L
-    }
+    fun cancelSleepTimer() = SleepTimer.cancel()
 
     private fun Song.toMediaItem(): MediaItem = MediaItem.Builder()
         .setMediaId(id.toString())
@@ -231,7 +212,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         tickJob?.cancel()
-        sleepJob?.cancel()
+        // 注意：不取消 SleepTimer，退出界面后 2 小时倒计时要继续生效
         controller?.removeListener(playerListener)
         controller?.release()
         controller = null

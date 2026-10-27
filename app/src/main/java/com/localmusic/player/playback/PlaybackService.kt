@@ -30,6 +30,11 @@ class PlaybackService : MediaSessionService() {
             .build()
 
         mediaSession = MediaSession.Builder(this, player).build()
+
+        // 定时关闭到点：暂停播放。计时器在进程级单例里，退出界面也不会丢。
+        SleepTimer.onFinished = {
+            mediaSession?.player?.pause()
+        }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
@@ -43,6 +48,8 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        SleepTimer.onFinished = null
+        SleepTimer.cancel()
         mediaSession?.run {
             player.release()
             release()

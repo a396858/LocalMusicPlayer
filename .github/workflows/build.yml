@@ -61,8 +61,26 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cp app/build/outputs/apk/debug/app-debug.apk LocalMusic-v1.0.apk
-          gh release delete latest --yes --cleanup-tag || true
-          gh release create latest LocalMusic-v1.0.apk \
-            --title "本地音乐播放器 v1.0" \
-            --notes "极简本地音乐播放器。只能播放手机里的本地音频，一个「定时关闭 2 小时」按钮，无联网权限。安装前需在系统设置里允许「安装未知来源应用」。" \
-            --latest
+          # 先确保 release 存在，再用 --clobber 覆盖同名资产。
+          # 不要用「删掉再建」：删除与创建之间容易出现旧资产残留。
+          gh release view latest --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1 || \
+            gh release create latest --repo "$GITHUB_REPOSITORY" \
+              --title "本地音乐播放器 v1.0" \
+              --notes "极简本地音乐播放器。只能播放手机里的本地音频，一个「定时关闭 2 小时」按钮，无联网权限。安装前需在系统设置里允许「安装未知来源应用」。" \
+              --latest
+          gh release upload latest LocalMusic-v1.0.apk --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: 校验发布资产
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          LOCAL_SUM=$(sha256sum app/build/outputs/apk/debug/app-debug.apk | cut -d' ' -f1)
+          REMOTE_SUM=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/latest" \
+            --jq '.assets[] | select(.name=="LocalMusic-v1.0.apk") | .digest' | sed 's/^sha256://')
+          echo "本地: $LOCAL_SUM"
+          echo "远端: $REMOTE_SUM"
+          if [ "$LOCAL_SUM" != "$REMOTE_SUM" ]; then
+            echo "::error::Release 资产与本次构建不一致，上传未生效"
+            exit 1
+          fi
